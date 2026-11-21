@@ -1,33 +1,7 @@
-### Supplementary PySpark Reference
-
-#A supplementary PySpark script (`etl_process.py`) was retained in the repository as a reference implementation for local validation and reproducibility. 
-# The script mirrors the core transformation logic of the Azure Data Factory pipeline, including timestamp conversion, temporal feature extraction, 
-# weather severity mapping, and Parquet output generation.
-
-#However, the final production ETL workflow for Phase 1 was implemented and executed in Azure Data Factory, not in PySpark.
-
-
-
-
-
+import argparse
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, when, hour, dayofweek, month, year, to_timestamp
-
-# Initialize Spark Session
-spark = SparkSession.builder \
-    .appName("US_Accidents_ETL_Reference") \
-    .config("spark.sql.parquet.compression.codec", "snappy") \
-    .getOrCreate()
-
-# Azure Data Lake Storage Gen2 paths
-# Final project storage account and containers
-INPUT_PATH = "abfss://raw@projecttraffic60302085.dfs.core.windows.net/US_Accidents_March23.csv"
-OUTPUT_PATH_PROCESSED = "abfss://processed@projecttraffic60302085.dfs.core.windows.net/accidents/"
-
-# Optional local testing
-# INPUT_PATH = "./US_Accidents_March23.csv"
-# OUTPUT_PATH_PROCESSED = "./processed_accidents.parquet"
 
 def preprocess_accidents(df):
     """
@@ -72,21 +46,16 @@ def preprocess_accidents(df):
     return df
 
 if __name__ == "__main__":
-    print(f"Loading data from {INPUT_PATH}...")
-
-    raw_df = spark.read \
-        .option("header", "true") \
-        .option("inferSchema", "true") \
-        .csv(INPUT_PATH)
-
-    print("Processing data...")
-    processed_df = preprocess_accidents(raw_df)
-
-    print(f"Saving Parquet output to {OUTPUT_PATH_PROCESSED}...")
-    processed_df.write \
-        .mode("overwrite") \
-        .partitionBy("accidentYear") \
-        .parquet(OUTPUT_PATH_PROCESSED)
-
-    print("Reference ETL job completed successfully.")
-    spark.stop()
+    parser = argparse.ArgumentParser(description="Prepare partitioned US Accidents Parquet features.")
+    parser.add_argument("--input", required=True, help="Source CSV path or configured cloud URI")
+    parser.add_argument("--output", required=True, help="Destination directory (overwritten)")
+    args = parser.parse_args()
+    spark = (SparkSession.builder.appName("US_Accidents_ETL_Reference")
+             .config("spark.sql.parquet.compression.codec", "snappy").getOrCreate())
+    try:
+        raw = spark.read.option("header", "true").option("inferSchema", "true").csv(args.input)
+        processed = preprocess_accidents(raw)
+        processed.write.mode("overwrite").partitionBy("accidentYear").parquet(args.output)
+        print(f"Wrote partitioned Parquet to {args.output}")
+    finally:
+        spark.stop()
